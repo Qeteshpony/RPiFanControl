@@ -15,3 +15,12 @@ Tested on Raspberry Pi 3B+ and 4B but should work on other versions as well.
   * Run `sudo systemctl enable RPiFanControl`
 * Add `dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4` to /boot/config.txt and 
 * **Reboot your Pi**
+
+# Usage
+
+Once the script is running it will control the connected fan according to the settings.  
+See comments in RPiFanControl.py for details. 
+
+It will by default also update two files with the current values on each change:
+* `/run/RPiFanControl/temperature` contains the current CPU temperature in °C as a float
+* `/run/RPiFanControl/dutycycle` contains the current PWM duty cycle in % as an integer
