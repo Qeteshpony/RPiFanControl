@@ -13,11 +13,12 @@ Don't forget to reboot for this to have an effect
 """
 
 from rpi_hardware_pwm import HardwarePWM, HardwarePWMException
-from time import sleep
+from threading import Timer
 import signal
 import pathlib
 import os
 
+# Default values
 CHANNEL = 0         # PWM Channel - 0 or 1
 MINTEMP = 40        # Minimum temperature in °C - fan is always off below this value
 MAXTEMP = 60        # Maximum temperature in °C - fan is always at 100% above this value
@@ -51,6 +52,8 @@ class PWMFan:
         :param writeFiles: write current temperature and dutycycle into files in run directory for external use
         :param temperaturePath: path to read system temperature - don't change this unless you know what you're doing
         """
+
+        # Initialize local objects
         self.sleeptime = sleeptime
         self.mintemp = mintemp
         self.maxtemp = maxtemp
@@ -59,49 +62,72 @@ class PWMFan:
         self.mindc = mindc
         self.maxdc = maxdc
         self.temperaturePath = temperaturePath
-        try:
-            self.pwm = HardwarePWM(PWMChannel, hz=25000)
-        except HardwarePWMException:
-            self.pwm = None
-            print("Hardware-PWM is not active! "
-                  "Add dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4 to /boot/congig.txt and reboot to enable!")
-        if self.pwm is not None:
-            self.pwm.start(0)
-        self.running = True
+        self.running = False
+        self.writeFiles = writeFiles
+        self.lasttemp = 0
         self.cwd = str(pathlib.Path.cwd())
         self.tempfile = self.cwd + "/temperature"
         self.dcfile = self.cwd + "/dutycycle"
-        self.writeFiles = writeFiles
-        self.lasttemp = 0
-        print("CWD:", self.cwd)
+        self._timer = None
+
+        # Try to initialize hardware PWM
+        try:
+            self.pwm = HardwarePWM(PWMChannel, hz=25000)
+        except HardwarePWMException:
+            # Warn if hardware PWM does not work
+            self.pwm = None
+            print("Hardware-PWM is not active! "
+                  "Add dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4 to /boot/congig.txt and reboot to enable!")
+
+        # Initialize the fan at 100% speed
+        if self.pwm is not None:
+            self.pwm.start(100)
+
+        # get and set paths
+        print("Current working directory:", self.cwd)
         if self.writeFiles:
             print("Temperature File:", self.tempfile)
             print("Duty Cycle File:", self.dcfile)
-        print("Starting the fan controller...")
+
+        # Initialize signal handlers
         signal.signal(signal.SIGINT, self._sig)
         signal.signal(signal.SIGHUP, self._sig)
         signal.signal(signal.SIGTERM, self._sig)
 
-    def _sig(self, signum, frame) -> None:
-        print(F"{signal.Signals(signum).name} ({signum}) cought in frame {frame}")
-        self.stop()
-
     def start(self, sleeptime: int = None) -> None:
         """
-        Loop updateFan() as long as running is True
+        Start the timer interval
         :param sleeptime: Change sleep time
         """
-        if sleeptime is not None:
-            self.sleeptime = sleeptime
-        while self.running:
-            self.updateFan()
-            sleep(self.sleeptime)
+        if self.running is False:
+            print("Starting the fan controller...")
+            self.running = True
+            if sleeptime is not None:
+                self.sleeptime = sleeptime
+            self._runTimer()
+
+    def _runTimer(self):
+        """
+        Set and start a timer thread
+        :return:
+        """
+        if self.running:
+            self._timer = Timer(self.sleeptime, self.updateFan)
+            self._timer.start()
+
+    def _sig(self, signum, frame) -> None:
+        """
+        Signal handler
+        """
+        print(F"{signal.Signals(signum).name} ({signum}) cought in frame {frame}")
+        self.stop()
 
     def stop(self) -> None:
         """
         Stop PWM and clean up
         """
         print("Stopping the fan controller...")
+        self._timer.cancel()
         self.running = False
         self.pwm.stop()
         if os.path.exists(self.tempfile):
@@ -111,15 +137,21 @@ class PWMFan:
 
     def updateFan(self) -> None:
         """
-        Call this in a loop to update the fan speed
+        Call this to update the fan speed
+
+        Also gets called by the timer thread
         """
+        # Get current temperature
         try:
             with open(self.temperaturePath, "r") as t:
                 temperature = int(t.readline().strip()) / 1000
         except FileNotFoundError:
             print(self.temperaturePath, "not found, using max value")
             temperature = self.maxtemp
+
+        # check if temperature changed. If so, go on
         if temperature != self.lasttemp:
+            # store temperature for next loop
             self.lasttemp = temperature
             if temperature < self.mintemp or (temperature < self.mintemp + self.hysteresis and self.hystOn is False):
                 # fan is off when temp below mintemp or hysteresis level
@@ -151,6 +183,9 @@ class PWMFan:
                         dcfile.write(str(dc))
                 except FileNotFoundError:
                     print("Can't write dc file")
+
+        # start the next timer
+        self._runTimer()
 
 
 if __name__ == "__main__":
