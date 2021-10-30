@@ -68,6 +68,7 @@ class PWMFan:
         self.cwd = str(pathlib.Path.cwd())
         self.tempfile = self.cwd + "/temperature"
         self.dcfile = self.cwd + "/dutycycle"
+        self.debug = False
         self._timer = None
 
         # Try to initialize hardware PWM
@@ -170,7 +171,8 @@ class PWMFan:
             if self.pwm is not None:
                 self.pwm.change_duty_cycle(dc)
             # print out temperature and dc
-            print(f"Temperature: {temperature:4.1f}°C - DutyCycle: {dc}%")
+            if self.debug:
+                print(f"Temperature: {temperature:4.1f}°C - DutyCycle: {dc}%")
             if self.writeFiles:
                 # write temperature and dutycycle values to files in run directory
                 try:
