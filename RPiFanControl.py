@@ -15,31 +15,22 @@ Don't forget to reboot for this to have an effect
 from rpi_hardware_pwm import HardwarePWM, HardwarePWMException
 from threading import Timer
 import signal
-import pathlib
 import os
-
-# Default values
-CHANNEL = 0         # PWM Channel - 0 or 1
-MINTEMP = 40        # Minimum temperature in °C - fan is always off below this value
-MAXTEMP = 60        # Maximum temperature in °C - fan is always at 100% above this value
-HYSTERESIS = 3      # Temperature hysteresis in °C for switching the fan on and off around mintemp
-MINDC = 20          # Minimum Duty Cycle for the fan
-MAXDC = 100         # Maximum Duty Cycle for the fan
-SLEEPTIME = 5       # time in seconds between updates
-WRITEFILES = True   # write current temperature and dutycycle into files in run directory for external use
+import configparser
 
 
 class PWMFan:
     def __init__(self,
-                 PWMChannel: int = CHANNEL,
-                 mintemp: int = MINTEMP,
-                 maxtemp: int = MAXTEMP,
-                 hysteresis: int = HYSTERESIS,
-                 mindc: int = MINDC,
-                 maxdc: int = MAXDC,
-                 sleeptime: int = SLEEPTIME,
-                 writeFiles: bool = WRITEFILES,
-                 temperaturePath: str = "/sys/class/thermal/thermal_zone0/temp"
+                 PWMChannel: int = 0,
+                 mintemp: int = 40,
+                 maxtemp: int = 60,
+                 hysteresis: int = 3,
+                 mindc: int = 20,
+                 maxdc: int = 100,
+                 sleeptime: int = 5,
+                 writeFiles: bool = True,
+                 configFile: str = "/etc/RPiFanControl.ini",
+                 temperaturePath: str = "/sys/class/thermal/thermal_zone0/temp",
                  ) -> None:
         """
         :param PWMChannel: 0 or 1
@@ -50,10 +41,12 @@ class PWMFan:
         :param maxdc: Maximum duty cycle for the fan
         :param sleeptime: Sleep time in seconds between updates when looping
         :param writeFiles: write current temperature and dutycycle into files in run directory for external use
+        :param configFile: path to configuration file. Reloaded through SIGUSR1 and has preference over local variables
         :param temperaturePath: path to read system temperature - don't change this unless you know what you're doing
         """
 
         # Initialize local objects
+        self.configFile = configFile
         self.sleeptime = sleeptime
         self.mintemp = mintemp
         self.maxtemp = maxtemp
@@ -65,11 +58,13 @@ class PWMFan:
         self.running = False
         self.writeFiles = writeFiles
         self.lasttemp = 0
-        self.cwd = str(pathlib.Path.cwd())
-        self.tempfile = self.cwd + "/temperature"
-        self.dcfile = self.cwd + "/dutycycle"
+        self.tempfile = None
+        self.dcfile = None
         self.debug = False
         self._timer = None
+
+        # read config-file
+        self._readConfig()
 
         # Try to initialize hardware PWM
         try:
@@ -85,15 +80,20 @@ class PWMFan:
             self.pwm.start(100)
 
         # get and set paths
-        print("Current working directory:", self.cwd)
-        if self.writeFiles:
-            print("Temperature File:", self.tempfile)
-            print("Duty Cycle File:", self.dcfile)
+        self.rtd = os.environ.get('RUNTIME_DIRECTORY')
+        if self.rtd is not None:
+            self.tempfile = self.rtd + "/temperature"
+            self.dcfile = self.rtd + "/dutycycle"
+
+        print("RuntimeDirectory:", self.rtd)
+        print("Temperature File:", self.tempfile)
+        print("Duty Cycle File:", self.dcfile)
 
         # Initialize signal handlers
         signal.signal(signal.SIGINT, self._sig)
         signal.signal(signal.SIGHUP, self._sig)
         signal.signal(signal.SIGTERM, self._sig)
+        signal.signal(signal.SIGUSR1, self._sig)  # used to reload the config-file
 
     def start(self, sleeptime: int = None) -> None:
         """
@@ -121,7 +121,26 @@ class PWMFan:
         Signal handler
         """
         print(F"{signal.Signals(signum).name} ({signum}) cought in frame {frame}")
-        self.stop()
+        if signum in [signal.SIGINT, signal.SIGTERM, signal.SIGHUP]:
+            self.stop()
+        elif signum == signal.SIGUSR1:
+            self._readConfig()
+
+    def _readConfig(self) -> None:
+        print("Reading config from", self.configFile)
+        config = configparser.ConfigParser()
+        config.read(self.configFile)
+        if "RPiFanControl" in config.sections():
+            conf = config["RPiFanControl"]
+            self.mintemp = conf.getint("MinTemp", self.mintemp)
+            self.maxtemp = conf.getint("MaxTemp", self.maxtemp)
+            self.mindc = conf.getint("MinDC", self.mindc)
+            self.maxdc = conf.getint("MaxDC", self.maxdc)
+            self.hysteresis = conf.getint("Hysteresis", self.hysteresis)
+            self.sleeptime = conf.getint("SleepTime", self.sleeptime)
+            self.writeFiles = conf.getboolean("WriteFiles", self.writeFiles)
+        else:
+            print("No valid configuration found")
 
     def stop(self) -> None:
         """

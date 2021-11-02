@@ -9,6 +9,9 @@ Tested on Raspberry Pi 3B+ and 4B but should work on other versions as well.
   * `sudo ln -s $PWD/RPiFanControl.service /etc/systemd/system/RPiFanControl.service`
 * Copy or link RPiFanControl.py to /usr/local/bin/RPiFanControl.py
   * `sudo ln -s $PWD/RPiFanControl.py /usr/local/bin/RPiFanControl.py` 
+* Optional: Copy RPiFanControl.example.ini to /etc/RPiFanControl.ini and edit the config
+  * `sudo cp RPiFanControl.example.ini /etc/RPiFanControl.ini`
+  * `sudo nano /etc/RPiFanControl.ini`
 * Install python requirements
   * Run `sudo pip3 install -r requirements.txt`
 * Enable system service

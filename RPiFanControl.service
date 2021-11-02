@@ -4,9 +4,9 @@ Description=RPi Fan Control
 [Service]
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/env python3 /usr/local/bin/RPiFanControl.py
+ExecReload=/bin/kill -USR1 $MAINPID
 Restart=on-failure
 RuntimeDirectory=RPiFanControl
-WorkingDirectory=/run/RPiFanControl
 SyslogIdentifier=RPiFanControl
 
 [Install]
